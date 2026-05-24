@@ -113,6 +113,17 @@ export class GoogleChatFormatConverter extends BaseFormatConverter {
       if (linkText === node.url) {
         return node.url;
       }
+      // Collapse redundant mailto:/tel: autolinks when the visible
+      const collapsibleSchemes = ["mailto:", "tel:"];
+      for (const scheme of collapsibleSchemes) {
+        if (!node.url.startsWith(scheme)) {
+          continue;
+        }
+        const bareValue = node.url.slice(scheme.length);
+        if (bareValue === linkText) {
+          return bareValue;
+        }
+      }
       return `<${node.url}|${linkText}>`;
     }
 
