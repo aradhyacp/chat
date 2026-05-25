@@ -51,9 +51,9 @@ describe("GoogleChatFormatConverter", () => {
 
     it("collapses mailto autolink for plain email text", () => {
       const ast = converter.toAst("hello@example.com");
-      
+
       const result = converter.fromAst(ast);
-      
+
       expect(result).toBe("hello@example.com");
     });
 
