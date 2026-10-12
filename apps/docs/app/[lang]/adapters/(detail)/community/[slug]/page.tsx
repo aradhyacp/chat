@@ -14,7 +14,6 @@ import {
   getAdapter,
   getIssuesUrl,
   getReadme,
-  getRepositoryUrl,
 } from "@/lib/geistdocs/adapter-readme";
 import { adaptersSource } from "@/lib/geistdocs/adapters-source";
 import { ReadmeContent } from "../../../components/readme-content";
@@ -187,7 +186,7 @@ const Page = async ({ params }: { params: Promise<PageParams> }) => {
           logo={data.logo}
           name={data.title}
           packageName={data.packageName}
-          sourceUrl={adapter ? getRepositoryUrl(adapter.readme) : undefined}
+          sourceUrl={adapter?.readme}
           tagline={data.tagline}
         />
         {adapter ? <CommunityNotice adapter={adapter} /> : null}
