@@ -1,0 +1,214 @@
+---
+title: Zoom Team Chat
+description: Community Zoom Team Chat adapter for Chat SDK with webhook signature verification, channel and DM messages, slash commands, mentions, and threaded replies.
+packageName: zoom-chat-adapter
+slug: zoom
+type: platform
+tagline: Community Zoom Team Chat adapter for Chat SDK. Receive channel, DM, slash-command, and mention events, then post, edit, delete, and reply to messages.
+community: true
+mdxBody: true
+---
+
+## Install
+
+<PackageInstall package="zoom-chat-adapter chat @chat-adapter/state-memory" />
+
+## Quick start
+
+```typescript title="lib/bot.ts" lineNumbers
+import { createMemoryState } from "@chat-adapter/state-memory";
+import { Chat } from "chat";
+import { createZoomAdapter } from "zoom-chat-adapter";
+
+export const bot = new Chat({
+  userName: "mybot",
+  adapters: {
+    zoom: createZoomAdapter(),
+  },
+  state: createMemoryState(),
+});
+
+bot.onNewMention(async (thread) => {
+  await thread.post("Hello from Zoom!");
+});
+```
+
+Called with no arguments, `createZoomAdapter()` reads its credentials from environment variables. The memory state adapter keeps subscriptions and locks in process memory, which suits local development. Use [Redis](/adapters/official/redis) or [PostgreSQL](/adapters/official/postgres) in production.
+
+Then create the webhook route:
+
+```typescript title="app/api/webhooks/zoom/route.ts" lineNumbers
+import { after } from "next/server";
+import { bot } from "@/lib/bot";
+
+export async function POST(request: Request): Promise<Response> {
+  return bot.webhooks.zoom(request, {
+    waitUntil: (task) => after(() => task),
+  });
+}
+```
+
+## Platform setup
+
+1. Go to [Zoom Marketplace](https://marketplace.zoom.us) and select **Develop → Build App**.
+2. Choose **General App**, then set the management type to **Admin-managed** under **Basic Information**.
+3. Copy **Client ID**, **Client Secret**, and **Account ID** from **App Credentials** into `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET`, and `ZOOM_ACCOUNT_ID`.
+4. Under **Surface → Team Chat Subscription**, enable the subscription, set **Bot Endpoint URL** to your deployed `/api/webhooks/zoom` route, and copy the **Bot JID** into `ZOOM_ROBOT_JID`.
+5. Under **Features → Access → Token**, copy the **Secret Token** into `ZOOM_WEBHOOK_SECRET_TOKEN`.
+6. Under **Features → Access → Event Subscription**, enable event subscriptions, set the webhook URL, and subscribe to `bot_notification` and `team_chat.app_mention`.
+7. Add the `imchat:bot`, `team_chat:read:app_mention:admin`, and `team_chat:write:message:admin` scopes.
+8. Under **Local Test**, select **Add app now** and complete the OAuth flow to install the bot in your account.
+
+For local development, expose your server with a tunnel such as ngrok and use the forwarding URL for both the bot endpoint and the event subscription.
+
+## Configuration
+
+<TypeTable
+  type={{
+    clientId: {
+      type: "string",
+      description:
+        "Zoom OAuth app client ID. Falls back to `ZOOM_CLIENT_ID`. Required at runtime.",
+    },
+    clientSecret: {
+      type: "string",
+      description:
+        "Zoom OAuth app client secret. Falls back to `ZOOM_CLIENT_SECRET`. Required at runtime.",
+    },
+    accountId: {
+      type: "string",
+      description:
+        "Zoom account ID. Falls back to `ZOOM_ACCOUNT_ID`. Required at runtime.",
+    },
+    robotJid: {
+      type: "string",
+      description:
+        "Bot JID from Team Chat Subscription. Falls back to `ZOOM_ROBOT_JID`. Required at runtime.",
+    },
+    webhookSecretToken: {
+      type: "string",
+      description:
+        "Secret used for webhook signature verification and the setup challenge. Falls back to `ZOOM_WEBHOOK_SECRET_TOKEN`. Required at runtime.",
+    },
+    userName: {
+      type: "string",
+      default: '"zoom-bot"',
+      description:
+        "Bot display name used by Chat SDK. Falls back to `ZOOM_BOT_USERNAME`.",
+    },
+    markdownSupport: {
+      type: "boolean",
+      default: "true",
+      description:
+        "Send messages with Zoom's Markdown parser enabled. Falls back to `ZOOM_MARKDOWN_SUPPORT`.",
+    },
+    logger: {
+      type: "Logger",
+      description: "Custom Chat SDK logger. Defaults to `ConsoleLogger`.",
+    },
+  }}
+/>
+
+### Environment variables
+
+The credentials are required at runtime, either through the environment or the factory options.
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `ZOOM_CLIENT_ID` | Yes, unless `clientId` is passed | Zoom OAuth app client ID. |
+| `ZOOM_CLIENT_SECRET` | Yes, unless `clientSecret` is passed | Zoom OAuth app client secret. |
+| `ZOOM_ACCOUNT_ID` | Yes, unless `accountId` is passed | Zoom account ID sent on message API calls. |
+| `ZOOM_ROBOT_JID` | Yes, unless `robotJid` is passed | Bot JID from Team Chat Subscription. |
+| `ZOOM_WEBHOOK_SECRET_TOKEN` | Yes, unless `webhookSecretToken` is passed | Secret used for webhook signature verification and the setup challenge. |
+| `ZOOM_BOT_USERNAME` | No | Bot display name. Defaults to `zoom-bot`. |
+| `ZOOM_MARKDOWN_SUPPORT` | No | Enable Zoom's Markdown parser. Defaults to `true`. |
+
+## Webhooks
+
+The adapter handles three event types:
+
+| Event | Purpose |
+| --- | --- |
+| `endpoint.url_validation` | Answers Zoom's setup challenge with the encrypted token. |
+| `bot_notification` | Channel messages, DMs, and slash commands. |
+| `team_chat.app_mention` | @-mentions in channels. |
+
+Every request except the setup challenge is verified with HMAC-SHA256 using the `x-zm-signature` and `x-zm-request-timestamp` headers. Requests older than five minutes are rejected. The route returns `400` for invalid JSON, `401` for a missing or invalid signature, and `200` for handled events.
+
+Pass the `Request` to `handleWebhook` without reading the body first. The signature covers the raw bytes, so parsing or logging the body before verification breaks every request.
+
+Passing `waitUntil` processes the event after the response is sent. Without it, the adapter waits for event processing before responding.
+
+## Messages
+
+`postMessage`, `editMessage`, and `deleteMessage` use Zoom's chat message API. Threaded replies use the `metadata.replyTo` field:
+
+```typescript
+await adapter.postMessage(threadId, {
+  raw: "Reply text",
+  metadata: { replyTo: "parent-message-id" },
+});
+```
+
+The adapter sends `replyTo` as `reply_main_message_id`. Replies posted into a DM thread are delivered, but Zoom does not send a webhook for the user's replies in that thread. See [Limitations](#limitations).
+
+`thread.startTyping()` does nothing because Zoom has no typing indicator API.
+
+## Formatting
+
+Messages are sent with Zoom's Markdown parser enabled by default, because the structured style API supports only bold and italic. The adapter translates standard Markdown to Zoom's dialect:
+
+| Markdown | Zoom output |
+| --- | --- |
+| `**bold**` | `*bold*`, the single-asterisk form Zoom renders as bold |
+| `_italic_` | `_italic_` |
+| `` `code` `` | `` `code` `` |
+| `~strikethrough~` | `~strikethrough~` |
+| `> quote` | Block quote |
+| `[label](https://example.com)` | `label <https://example.com>` |
+| `![alt](https://example.com/a.png)` | `<img:https://example.com/a.png\|alt>` |
+| `# heading` | Bold line |
+| `* item` | Bullet line |
+| Tables | Pipe-separated text |
+| `__underline__` | Plain text |
+
+Zoom has no heading, underline, or table tokens, so those elements fall back to the closest text representation. Code spans and fenced blocks are left unchanged.
+
+Setting `markdownSupport: false` sends structured plain-text segments instead. Whole-paragraph bold is preserved, but inline formatting, links, strikethrough, block quotes, and images lose their formatting.
+
+The Zoom client renders images only from trusted domains. Images from other hosts are dropped client-side with a `[Security] Blocked image from untrusted domain` warning. Add the host to your app's trusted domains, or use a host the client already trusts.
+
+## Streaming
+
+Streaming is buffered. The adapter accumulates output and sends it as one message when the stream ends.
+
+## Thread IDs
+
+```text
+zoom:{channelId}:{messageId}
+```
+
+`channelId` is a Zoom JID. A JID ending in `@conference.xmpp.zoom.us` is a channel, and any other JID is a DM. `messageId` is the `event_ts` for `bot_notification` or the message ID for `team_chat.app_mention`.
+
+Channel example: `zoom:abc123@conference.xmpp.zoom.us:1729000000000`
+
+The adapter also accepts a channel-level ID without a message ID, `zoom:{channelId}`, when posting a new message to a channel.
+
+## Limitations
+
+- Thread subscription does not work. Each `bot_notification` has a thread ID derived from a unique `event_ts`, and Zoom provides no field that links a reply to its parent message.
+- Zoom does not send `chat_message.replied` events for 1:1 DM thread replies, so the adapter cannot receive them.
+- Payloads containing emoji or accented characters can fail signature verification because Zoom may normalize Unicode before signing the request. The adapter logs the first 200 bytes of the body as hex at `debug` level when the comparison fails. Contact Zoom Support citing ZOOM-506645 if this affects your app.
+- Reactions, message history, thread lookup, and user lookup are not implemented. Those methods throw `NotImplementedError`.
+- There is no typing indicator, no file upload, and no card, button, or modal support.
+- Streaming is buffered rather than incremental.
+
+## Feature support
+
+<FeatureSupport />
+
+## Resources
+
+- [Adapter source](https://github.com/aradhyacp/zoom-chat-adapter)
+- [Adapter documentation](https://zoom-chat-adapter.vercel.app)
+- [Zoom Team Chat API](https://developers.zoom.us/docs/chat/)
