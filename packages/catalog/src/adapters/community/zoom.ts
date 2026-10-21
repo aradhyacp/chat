@@ -3,14 +3,14 @@ import type { CommunityAdapter } from "../../types";
 export const zoom = {
   author: "aradhyacp",
   description:
-    "Community Zoom Team Chat adapter for Chat SDK with webhook signature verification, channel and DM messages, slash commands, mentions, and threaded replies.",
+    "Community Zoom Team Chat adapter for Chat SDK with webhook signature verification, channel and DM messages, mentions, and direct threaded replies.",
   features: {
     postMessage: "yes",
-    messageReplies: "yes",
+    messageReplies: { status: "partial", label: "Direct adapter call" },
     editMessage: "yes",
     deleteMessage: "yes",
     fileUploads: "no",
-    streaming: { status: "partial", label: "Buffered" },
+    streaming: { status: "partial", label: "Post+Edit" },
     scheduledMessages: "no",
     cardFormat: "no",
     buttons: "no",
@@ -21,7 +21,7 @@ export const zoom = {
     fields: "no",
     imagesInCards: "no",
     modals: "no",
-    slashCommands: "yes",
+    slashCommands: { status: "partial", label: "Delivered as messages" },
     mentions: "yes",
     addReactions: "no",
     removeReactions: "no",

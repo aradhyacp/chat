@@ -1,6 +1,6 @@
 ---
 title: Zoom Team Chat
-description: Community Zoom Team Chat adapter for Chat SDK with webhook signature verification, channel and DM messages, slash commands, mentions, and threaded replies.
+description: Community Zoom Team Chat adapter for Chat SDK with webhook signature verification, channel and DM messages, mentions, and direct threaded replies.
 packageName: zoom-chat-adapter
 slug: zoom
 type: platform
@@ -65,32 +65,34 @@ For local development, expose your server with a tunnel such as ngrok and use th
 
 ## Configuration
 
+All five credentials are required. `createZoomAdapter()` reads the options first, then the environment, and throws a `ValidationError` during construction when one is missing. Importing the bot module without the credentials therefore fails, including during a build.
+
 <TypeTable
   type={{
     clientId: {
       type: "string",
       description:
-        "Zoom OAuth app client ID. Falls back to `ZOOM_CLIENT_ID`. Required at runtime.",
+        "Zoom OAuth app client ID. Falls back to `ZOOM_CLIENT_ID`.",
     },
     clientSecret: {
       type: "string",
       description:
-        "Zoom OAuth app client secret. Falls back to `ZOOM_CLIENT_SECRET`. Required at runtime.",
+        "Zoom OAuth app client secret. Falls back to `ZOOM_CLIENT_SECRET`.",
     },
     accountId: {
       type: "string",
       description:
-        "Zoom account ID. Falls back to `ZOOM_ACCOUNT_ID`. Required at runtime.",
+        "Zoom account ID. Falls back to `ZOOM_ACCOUNT_ID`.",
     },
     robotJid: {
       type: "string",
       description:
-        "Bot JID from Team Chat Subscription. Falls back to `ZOOM_ROBOT_JID`. Required at runtime.",
+        "Bot JID from Team Chat Subscription. Falls back to `ZOOM_ROBOT_JID`.",
     },
     webhookSecretToken: {
       type: "string",
       description:
-        "Secret used for webhook signature verification and the setup challenge. Falls back to `ZOOM_WEBHOOK_SECRET_TOKEN`. Required at runtime.",
+        "Secret used for webhook signature verification and the setup challenge. Falls back to `ZOOM_WEBHOOK_SECRET_TOKEN`.",
     },
     userName: {
       type: "string",
@@ -113,7 +115,7 @@ For local development, expose your server with a tunnel such as ngrok and use th
 
 ### Environment variables
 
-The credentials are required at runtime, either through the environment or the factory options.
+Pass each credential through the factory options or the environment. `createZoomAdapter()` validates all five during construction.
 
 | Variable | Required | Description |
 | --- | --- | --- |
@@ -143,16 +145,28 @@ When you pass `waitUntil`, the adapter processes the event after it sends the re
 
 ## Messages
 
-`postMessage`, `editMessage`, and `deleteMessage` use Zoom's chat message API. Threaded replies use the `metadata.replyTo` field:
+`postMessage`, `editMessage`, and `deleteMessage` use Zoom's chat message API.
+
+Zoom supports native threaded replies through `reply_main_message_id`, but the adapter does not implement Chat SDK's optional `reply()` method. `thread.reply()` therefore throws `NotImplementedError`. To create a threaded reply, call the adapter directly with the exported `ZoomMessageWithReply` shape:
 
 ```typescript
-await adapter.postMessage(threadId, {
+import type { AdapterPostableMessage } from "chat";
+import type { ZoomMessageWithReply } from "zoom-chat-adapter";
+
+const zoom = bot.getAdapter("zoom");
+const reply: ZoomMessageWithReply = {
   raw: "Reply text",
-  metadata: { replyTo: "parent-message-id" },
-});
+  metadata: { replyTo: parentMessageId },
+};
+
+await zoom.postMessage(threadId, reply as AdapterPostableMessage);
 ```
 
-The adapter sends `replyTo` as `reply_main_message_id`. Replies posted into a DM thread are delivered, but Zoom does not send a webhook for the user's replies in that thread. See [Limitations](#limitations).
+`ZoomMessageWithReply` is a Zoom-specific extension, so the cast to `AdapterPostableMessage` is required. The adapter sends `metadata.replyTo` as `reply_main_message_id`.
+
+Slash commands and @-mentions arrive as ordinary messages. The adapter marks them as mentions, so Chat SDK message handlers receive them. `onSlashCommand` handlers do not fire because the adapter does not call Chat SDK's slash-command dispatcher.
+
+Replies posted into a DM thread are delivered, but Zoom does not send a webhook for the user's replies in that thread. See [Limitations](#limitations).
 
 `thread.startTyping()` does nothing because Zoom has no typing indicator API.
 
@@ -182,7 +196,7 @@ The Zoom client renders images only from trusted domains. Images from other host
 
 ## Streaming
 
-Streaming is buffered. The adapter accumulates output and sends it as one message when the stream ends.
+The adapter has no native stream method. When you call `thread.stream()`, Chat SDK posts a placeholder message and edits it about every 500 ms with the accumulated text. Set `fallbackStreamingPlaceholderText` or `updateIntervalMs` in the stream options to change the placeholder or the edit interval.
 
 ## Thread IDs
 
@@ -200,7 +214,9 @@ The adapter also accepts a channel-level ID without a message ID, `zoom:{channel
 
 - Thread subscription does not work, so a bot can't follow a conversation across messages. Each `bot_notification` has a thread ID derived from a unique `event_ts`, and Zoom provides no field that links a reply to its parent message.
 - Zoom does not send `chat_message.replied` events for replies in 1:1 DM threads, so the adapter can't receive them.
-- Payloads containing emoji or accented characters can fail signature verification because Zoom may normalize Unicode differently before signing the request. When the comparison fails, the adapter logs the first 200 bytes of the body as hex at `debug` level. If this affects your app, contact Zoom Support and cite ZOOM-506645.
+- Payloads containing emoji or accented characters can fail signature verification because Zoom may normalize Unicode differently before signing the request. When the signature and expected digest have different lengths, the adapter logs the first 200 hex characters of the body (100 bytes) at `debug` level. An ordinary digest mismatch does not log the body. If this affects your app, contact Zoom Support and cite ZOOM-506645.
+- Chat SDK's `thread.reply()` is not implemented. Use the adapter's `postMessage()` with `metadata.replyTo` for native Zoom threading, as shown in [Messages](#messages).
+- Slash commands arrive as ordinary messages, so `onSlashCommand` handlers do not fire. Use a message handler instead.
 - Reactions, message history, and thread lookup are not implemented. Those methods throw `NotImplementedError`.
 - Zoom has no typing indicator API, and the adapter does not support file uploads, cards, buttons, or modals.
 
