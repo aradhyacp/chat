@@ -196,7 +196,19 @@ The Zoom client renders images only from trusted domains. Images from other host
 
 ## Streaming
 
-The adapter has no native stream method. When you call `thread.stream()`, Chat SDK posts a placeholder message and edits it about every 500 ms with the accumulated text. Set `fallbackStreamingPlaceholderText` or `updateIntervalMs` in the stream options to change the placeholder or the edit interval.
+The adapter has no native stream method. Pass an async iterable to `thread.post()`, and Chat SDK uses its post+edit fallback: it posts a placeholder message and edits it about every 500 ms with the accumulated text.
+
+```typescript
+await thread.post(stream);
+```
+
+Set `streamingUpdateIntervalMs` or `fallbackStreamingPlaceholderText` on `new Chat({ ... })` to change the edit interval or placeholder for every stream. To set options for one stream, wrap it in `StreamingPlan`:
+
+```typescript
+import { StreamingPlan } from "chat";
+
+await thread.post(new StreamingPlan(stream, { updateIntervalMs: 750 }));
+```
 
 ## Thread IDs
 
