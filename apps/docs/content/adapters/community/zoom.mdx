@@ -13,6 +13,8 @@ mdxBody: true
 
 <PackageInstall package="zoom-chat-adapter chat @chat-adapter/state-memory" />
 
+`zoom-chat-adapter` is ESM-only and runs on Node.js. It has no CommonJS build.
+
 ## Quick start
 
 ```typescript title="lib/bot.ts" lineNumbers
@@ -108,7 +110,8 @@ All five credentials are required. `createZoomAdapter()` reads the options first
     },
     logger: {
       type: "Logger",
-      description: "Custom Chat SDK logger. Defaults to `ConsoleLogger`.",
+      description:
+        "Custom Chat SDK logger. Defaults to `new ConsoleLogger(\"info\").child(\"zoom\")`.",
     },
   }}
 />
@@ -146,6 +149,23 @@ When you pass `waitUntil`, the adapter processes the event after it sends the re
 ## Messages
 
 `postMessage`, `editMessage`, and `deleteMessage` use Zoom's chat message API.
+
+When the adapter has seen the thread's webhook in the current process, it includes the JID of the person who started the thread on the message call. A thread the process never received a webhook for is sent without that JID. Empty messages are skipped because Zoom rejects empty content.
+
+### Edit and delete messages
+
+`editMessage()` replaces a message the bot sent, and `deleteMessage()` removes it. Both take the thread ID and the message ID returned when the message was posted.
+
+```typescript
+const zoom = bot.getAdapter("zoom");
+
+await zoom.editMessage(threadId, messageId, { raw: "Rolled back." });
+await zoom.deleteMessage(threadId, messageId);
+```
+
+Zoom answers an edit with `204 No Content`, so `editMessage()` returns the message ID you passed with an empty body.
+
+### Reply in a thread
 
 Zoom supports native threaded replies through `reply_main_message_id`, but the adapter does not implement Chat SDK's optional `reply()` method. `thread.reply()` therefore throws `NotImplementedError`. To create a threaded reply, call the adapter directly with the exported `ZoomMessageWithReply` shape:
 
@@ -196,7 +216,7 @@ The Zoom client renders images only from trusted domains. Images from other host
 
 ## Streaming
 
-The adapter has no native stream method. Pass an async iterable to `thread.post()`, and Chat SDK uses its post+edit fallback: it posts a placeholder message and edits it about every 500 ms with the accumulated text.
+The adapter has no native stream method, and Zoom has no partial-message API. Pass an async iterable to `thread.post()`, and Chat SDK uses its post+edit fallback: it posts a placeholder message and edits it about every 500 ms with the accumulated text.
 
 ```typescript
 await thread.post(stream);
@@ -220,6 +240,8 @@ zoom:{channelId}:{messageId}
 
 Channel example: `zoom:abc123@conference.xmpp.zoom.us:1729000000000`
 
+DM example: `zoom:user@xmpp.zoom.us:1729000000000`
+
 The adapter also accepts a channel-level ID without a message ID, `zoom:{channelId}`, when posting a new message to a channel.
 
 ## Limitations
@@ -229,7 +251,7 @@ The adapter also accepts a channel-level ID without a message ID, `zoom:{channel
 - Payloads containing emoji or accented characters can fail signature verification because Zoom may normalize Unicode differently before signing the request. When the signature and expected digest have different lengths, the adapter logs the first 200 hex characters of the body (100 bytes) at `debug` level. An ordinary digest mismatch does not log the body. If this affects your app, contact Zoom Support and cite ZOOM-506645.
 - Chat SDK's `thread.reply()` is not implemented. Use the adapter's `postMessage()` with `metadata.replyTo` for native Zoom threading, as shown in [Messages](#messages).
 - Slash commands arrive as ordinary messages, so `onSlashCommand` handlers do not fire. Use a message handler instead.
-- Reactions, message history, and thread lookup are not implemented. Those methods throw `NotImplementedError`.
+- Reactions, message history, thread lookup, and `parseMessage()` are not implemented. Those methods throw `NotImplementedError`.
 - Zoom has no typing indicator API, and the adapter does not support file uploads, cards, buttons, or modals.
 
 ## Feature support
